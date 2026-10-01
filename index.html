@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DermIA - Triagem Dermatológica</title>
+    <!-- Importa o TensorFlow.js diretamente no navegador -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            max-width: 550px;
+            width: 100%;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        h1 { color: #0056b3; text-align: center; margin-top: 0; }
+        p.sub { text-align: center; color: #666; font-size: 14px; margin-bottom: 25px; }
+        
+        .section { margin-bottom: 20px; }
+        label.title { font-weight: bold; display: block; margin-bottom: 8px; }
+        
+        input[type="file"] { width: 100%; padding: 8px; margin-bottom: 10px; }
+        #preview { display: none; width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; margin-top: 10px; }
+        
+        .checkbox-group { display: flex; flex-direction: column; gap: 8px; margin-top: 5px; }
+        .checkbox-group label { font-size: 14px; cursor: pointer; }
+        
+        button {
+            width: 100%;
+            padding: 14px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        button:hover { background-color: #0056b3; }
+        
+        #status { margin-top: 15px; text-align: center; font-weight: bold; color: #555; }
+        #resultado {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+            text-align: center;
+        }
+        .alerta { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .normal { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>DermIA</h1>
+    <p class="sub">Sistema de Triagem Dermatológica por Inteligência Artificial</p>
+
+    <div class="section">
+        <label class="title">1. Envie a foto da lesão:</label>
+        <input type="file" id="imageInput" accept="image/*" onchange="mostrarPreview(event)">
+        <img id="preview" alt="Pré-visualização da imagem">
+    </div>
+
+    <div class="section">
+        <label class="title">2. Relatar Sintomas (Marque as opções aplicáveis):</label>
+        <div class="checkbox-group">
+            <label><input type="checkbox" name="sintoma" value="0.25"> A lesão mudou de tamanho, cor ou formato recentemente</label>
+            <label><input type="checkbox" name="sintoma" value="0.10"> Sinto coceira ou ardor no local</label>
+            <label><input type="checkbox" name="sintoma" value="0.30"> A lesão sangra ou solta líquido</label>
+            <label><input type="checkbox" name="sintoma" value="0.30"> É uma ferida que não cicatriza há mais de 1 mês</label>
+        </div>
+    </div>
+
+    <button onclick="executarTriagem()">Analisar com IA</button>
+
+    <div id="status">Carregando Inteligência Artificial...</div>
+    <div id="resultado"></div>
+</div>
+
+<script>
+    let modeloIA = null;
+
+    // 1. Carrega o modelo de IA assim que a página é aberta
+    async function carregarModelo() {
+        try {
+            // Carrega os arquivos convertidos do TensorFlow.js
+            modeloIA = await tf.loadLayersModel('tfjs_model/model.json');
+            document.getElementById('status').innerText = "✓ IA Pronta para Análise";
+            document.getElementById('status').style.color = "green";
+        } catch (erro) {
+            console.error(erro);
+            document.getElementById('status').innerText = "⚠️ Abra o site através de um servidor local (ex: Live Server) para carregar a IA.";
+            document.getElementById('status').style.color = "red";
+        }
+    }
+
+    // Exibe a imagem selecionada na tela
+    function mostrarPreview(event) {
+        const reader = new FileReader();
+        reader.onload = function() {
+            const preview = document.getElementById('preview');
+            preview.src = reader.result;
+            preview.style.display = 'block';
+        }
+        reader.readAsDataURL(event.target.files[0]);
+    }
+
+    // 2. Executa a análise (Rede Neural + Sintomas)
+    async function executarTriagem() {
+        if (!modeloIA) {
+            alert("Aguarde a IA carregar completamente.");
+            return;
+        }
+
+        const imgElement = document.getElementById('preview');
+        if (!imgElement.src || imgElement.style.display === 'none') {
+            alert("Por favor, selecione uma imagem primeiro.");
+            return;
+        }
+
+        document.getElementById('status').innerText = "Processando imagem...";
+
+        // --- PROCESSAMENTO DA IMAGEM NA REDE NEURAL ---
+        // Converte a imagem do HTML para Tensor, redimensiona para 224x224 e normaliza (0 a 1)
+        const tensorImg = tf.browser.fromPixels(imgElement)
+            .resizeNearestNeighbor([224, 224])
+            .toFloat()
+            .div(tf.scalar(255.0))
+            .expandDims(0);
+
+        // Predição da IA
+        const predao = await modeloIA.predict(tensorImg).data();
+        const probImagem = predao[0]; // Probabilidade retornada pela MobileNetV2
+
+        // --- CÁLCULO DOS SINTOMAS ---
+        let scoreSintomas = 0;
+        const checkboxes = document.querySelectorAll('input[name="sintoma"]:checked');
+        checkboxes.forEach(cb => {
+            scoreSintomas += parseFloat(cb.value);
+        });
+
+        // --- SCORE FINAL COMBINADO (60% Imagem + 40% Sintomas) ---
+        const scoreFinal = (probImagem * 0.60) + (scoreSintomas * 0.40);
+        const porcentagem = (scoreFinal * 100).toFixed(1);
+
+        // --- EXIBIÇÃO DO RESULTADO ---
+        const divResultado = document.getElementById('resultado');
+        divResultado.style.display = 'block';
+
+        if (scoreFinal >= 0.30) {
+            divResultado.className = 'alerta';
+            divResultado.innerHTML = `
+                <h3>⚠️ ALERTA DE SUSPEITA</h3>
+                <p>Score Combinado: <strong>${porcentagem}%</strong></p>
+                <p>Recomendada avaliação médica/dermatológica presencial.</p>
+            `;
+        } else {
+            divResultado.className = 'normal';
+            divResultado.innerHTML = `
+                <h3>✅ BAIXO RISCO</h3>
+                <p>Score Combinado: <strong>${porcentagem}%</strong></p>
+                <p>Padrão observado sem sinais de alerta aparentes. Mantenha acompanhamento preventivo.</p>
+            `;
+        }
+
+        document.getElementById('status').innerText = "";
+    }
+
+    // Inicializa o modelo ao abrir a página
+    carregarModelo();
+</script>
+
+</body>
+</html>
